@@ -29,33 +29,17 @@ public class JobParallelForTesting : MonoBehaviour
     void Update()
     {
         RunSimple();
-        RunJobs();
-//        RunBurstJobs();
+        RunJobs(false);
+        RunJobs(true);
     }
 
-//    private void RunBurstJobs()
-//    {
-//        var startTime = Time.realtimeSinceStartup;
-//        NativeList<JobHandle> jobHandles = new NativeList<JobHandle>(10, Allocator.Temp);
-//        for (int i = 0; i < 10; i++)
-//        {
-//            JobHandle jobHandle = ReallyToughTaskJobBurst(50000);
-//            jobHandles.Add(jobHandle);
-//        }
-//
-//        JobHandle.CompleteAll(jobHandles);
-//        jobHandles.Dispose();
-//
-//        Debug.Log("Job Burst: " + (Time.realtimeSinceStartup - startTime) * 1000f + " ms");
-//    }
-
-    private void RunJobs()
+    private void RunJobs(bool burst)
     {
         var startTime = Time.realtimeSinceStartup;
 
-        ReallyToughTaskJob();
-        
-        Debug.Log("Job: " + (Time.realtimeSinceStartup - startTime) * 1000f + " ms");
+        ReallyToughTaskJob(burst);
+
+        Debug.Log("Job" + (burst ? " burst" : "") + ": " + (Time.realtimeSinceStartup - startTime) * 1000f + " ms");
     }
 
 
@@ -76,7 +60,7 @@ public class JobParallelForTesting : MonoBehaviour
     }
 
 
-    private void ReallyToughTaskJob()
+    private void ReallyToughTaskJob(bool burst)
     {
         NativeArray<float3> dataArray = new NativeArray<float3>(dataToProcesses.Count, Allocator.TempJob);
         for (var index = 0; index < dataToProcesses.Count; index++)
@@ -84,14 +68,7 @@ public class JobParallelForTesting : MonoBehaviour
             dataArray[index] = dataToProcesses[index].Position;
         }
 
-        ReallyToughTaskJobParallelFor reallyToughTaskJobParallelFor = new ReallyToughTaskJobParallelFor
-        {
-            Time = Time.deltaTime,
-            DataArray = dataArray,
-            Random = Random.Range(0, 100)
-        };
-        JobHandle jobHandle = reallyToughTaskJobParallelFor.Schedule(dataArray.Length, 100);
-        jobHandle.Complete();
+        Create(dataArray, burst).Complete();
 
         for (int i = 0; i < dataArray.Length; i++)
         {
@@ -100,14 +77,32 @@ public class JobParallelForTesting : MonoBehaviour
         
         dataArray.Dispose();
     }
-    
-//    private JobHandle ReallyToughTaskJobBurst(float count)
-//    {
-//        ReallyToughTaskJobBurst reallyToughTaskJobBurst = new ReallyToughTaskJobBurst() {Count = count};
-//        return reallyToughTaskJobBurst.Schedule();
-//    }
 
-
+    private static JobHandle Create(NativeArray<float3> dataArray, bool burst)
+    {
+        if (!burst)
+        {
+            ReallyToughTaskJobParallelFor reallyToughTaskJobParallelFor = new ReallyToughTaskJobParallelFor
+            {
+                Time = Time.deltaTime,
+                DataArray = dataArray,
+                Random = Random.Range(0, 100)
+            };
+            JobHandle jobHandle = reallyToughTaskJobParallelFor.Schedule(dataArray.Length, 1000);
+            return jobHandle;            
+        }
+        else
+        {
+            ReallyToughTaskJobParallelForBurst reallyToughTaskJobParallelFor = new ReallyToughTaskJobParallelForBurst
+            {
+                Time = Time.deltaTime,
+                DataArray = dataArray,
+                Random = Random.Range(0, 100)
+            };
+            JobHandle jobHandle = reallyToughTaskJobParallelFor.Schedule(dataArray.Length, 1000);
+            return jobHandle;
+        }
+    }
 }
 
 public static class JobTestingTool
@@ -135,18 +130,17 @@ public struct ReallyToughTaskJobParallelFor : IJobParallelFor
         DataArray[index] = JobTestingTool.Process(data, Random) * Time;
     }
 }
-//
-//[BurstCompile]
-//public struct ReallyToughTaskJobBurst : IJob
-//{
-//    public float Count;
-//    
-//    public void Execute()
-//    {
-//        float value = 0f;
-//        for (int i = 0; i < Count; i++)
-//        {
-//            value = math.exp10(math.sqrt(value));
-//        }
-//    }
-//}
+
+[BurstCompile]
+public struct ReallyToughTaskJobParallelForBurst : IJobParallelFor
+{
+    public NativeArray<float3> DataArray;
+    [ReadOnly] public float Time;
+    [ReadOnly] public float Random;
+
+    public void Execute(int index)
+    {
+        float3 data = DataArray[index];
+        DataArray[index] = JobTestingTool.Process(data, Random) * Time;
+    }
+}

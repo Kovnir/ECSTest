@@ -7,7 +7,7 @@ using Unity.Transforms;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
-public class Test : MonoBehaviour
+public class Spawner : MonoBehaviour
 {
     [SerializeField] private Mesh mesh;
     [SerializeField] private Material material;
@@ -21,17 +21,20 @@ public class Test : MonoBehaviour
             typeof(Translation),
             typeof(RenderMesh),
             typeof(LocalToWorld),
-            typeof(MoveSpeed)
+            typeof(MoveSpeed),
+            typeof(Rotation),
+            typeof(RotationSpeed)
         );
 
 
-        NativeArray<Entity> entities = new NativeArray<Entity>(10000, Allocator.Temp);
+        NativeArray<Entity> entities = new NativeArray<Entity>(1000, Allocator.Temp);
         em.CreateEntity(entityArchetype, entities);
         foreach (var entity in entities)
         {
             em.SetComponentData(entity, new LevelComponent {Level = Random.Range(10,20)});
             em.SetComponentData(entity, new MoveSpeed {moveSpeed= Random.Range(0.1f,5)});
             em.SetComponentData(entity, new Translation {Value = new float3(Random.Range(-8,8),Random.Range(-5,5),0)});
+            em.SetComponentData(entity, new RotationSpeed() { Speed = Random.Range(-1,1)});
             
             em.SetSharedComponentData(entity, new RenderMesh()
             {

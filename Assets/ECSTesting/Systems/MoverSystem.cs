@@ -1,6 +1,8 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
@@ -9,8 +11,7 @@ public class MoverSystem : ComponentSystem
 {
     protected override void OnUpdate()
     {
-        Entities.ForEach((ref Translation translation, ref MoveSpeed moveSpeed
-        ) =>
+        Entities.ForEach((ref Translation translation, ref MoveSpeed moveSpeed) =>
         {
             translation.Value.y += moveSpeed.moveSpeed * Time.deltaTime;
             if (translation.Value.y > 5)

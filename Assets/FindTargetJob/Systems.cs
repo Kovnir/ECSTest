@@ -24,10 +24,10 @@ namespace FindTarget
             NativeArray<Entity> entities = eq.ToEntityArray(Allocator.TempJob);
             NativeArray<Translation> translations = eq.ToComponentDataArray<Translation>(Allocator.TempJob);
             
-            NativeArray<EntityWithPosition> entitysWithPosition = new NativeArray<EntityWithPosition>(entities.Length, Allocator.TempJob);
+            NativeArray<EntityWithPosition> targetEntitysWithPosition = new NativeArray<EntityWithPosition>(entities.Length, Allocator.TempJob);
             for (int i = 0; i < entities.Length; i++)
             {
-                entitysWithPosition[i] = new EntityWithPosition()
+                targetEntitysWithPosition[i] = new EntityWithPosition()
                 {
                     Entity = entities[i],
                     Position = translations[i].Value
@@ -36,16 +36,27 @@ namespace FindTarget
 
             entities.Dispose();
             translations.Dispose();
+
+            NativeArray<Entity> foundTargets = new NativeArray<Entity>(
+                GetEntityQuery(typeof(NPCTag), ComponentType.Exclude<HasTarget>()).CalculateEntityCount(),
+                Allocator.TempJob);
             
             FindTargetJob findTargetJob = new FindTargetJob()
             {
-                TargetArray = entitysWithPosition,
-                EntityCommandBuffer = endSimulationEntityCommandBufferSystem.CreateCommandBuffer().ToConcurrent()
+                TargetArray = targetEntitysWithPosition,
+                SelectedTargets = foundTargets
             };
+            JobHandle findTargetJobHandle = findTargetJob.Schedule(this, inputDeps);
 
-            JobHandle handle = findTargetJob.Schedule(this, inputDeps);
-            endSimulationEntityCommandBufferSystem.AddJobHandleForProducer(handle);
-            return handle;
+            SetTargetJob setTargetJob = new SetTargetJob()
+            {
+                EntityCommandBuffer = endSimulationEntityCommandBufferSystem.CreateCommandBuffer().ToConcurrent(),
+                TargetArray = foundTargets
+            };
+            JobHandle setTargetJobHandle = setTargetJob.Schedule(this, findTargetJobHandle);
+            
+            endSimulationEntityCommandBufferSystem.AddJobHandleForProducer(setTargetJobHandle);
+            return setTargetJobHandle;
         }
 
         public struct EntityWithPosition
@@ -56,15 +67,12 @@ namespace FindTarget
 
         [RequireComponentTag(typeof(NPCTag))]
         [ExcludeComponent(typeof(HasTarget))]
-//        [BurstCompile]
+        [BurstCompile]
         private struct FindTargetJob : IJobForEachWithEntity<Translation>
         {
-            [ReadOnly]
-            [DeallocateOnJobCompletion]
-            public NativeArray<EntityWithPosition> TargetArray;
+            [ReadOnly] [DeallocateOnJobCompletion] public NativeArray<EntityWithPosition> TargetArray;
+            public NativeArray<Entity> SelectedTargets;
 
-            public EntityCommandBuffer.Concurrent EntityCommandBuffer;
-            
             public void Execute(Entity npc, int index, [ReadOnly] ref Translation translation)
             {
                 float3 npcPos = translation.Value;
@@ -82,7 +90,24 @@ namespace FindTarget
                         minDistance = distance;
                     }
                 }
-                
+
+                SelectedTargets[index] = target;
+            }
+        }
+
+        [RequireComponentTag(typeof(NPCTag))]
+        [ExcludeComponent(typeof(HasTarget))]
+        private struct SetTargetJob : IJobForEachWithEntity<Translation>
+        {
+            [ReadOnly]
+            [DeallocateOnJobCompletion]
+            public NativeArray<Entity> TargetArray;
+
+            public EntityCommandBuffer.Concurrent EntityCommandBuffer;
+            
+            public void Execute(Entity npc, int index, [ReadOnly] ref Translation translation)
+            {
+                var target = TargetArray[index];
                 if (target != Entity.Null)
                 {
                     EntityCommandBuffer.AddComponent(index, npc, new HasTarget

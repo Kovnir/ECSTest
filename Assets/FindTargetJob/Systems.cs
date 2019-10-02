@@ -1,5 +1,8 @@
 using JetBrains.Annotations;
+using Unity.Burst;
+using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
@@ -7,35 +10,87 @@ using UnityEngine;
 namespace FindTarget
 {
     [UsedImplicitly]
-    public class FindTargetSystems : ComponentSystem
+    public class FindTargetSystems : JobComponentSystem
     {
-        protected override void OnUpdate()
+        private EndSimulationEntityCommandBufferSystem endSimulationEntityCommandBufferSystem;
+        protected override void OnCreate()
         {
-            Entities.WithAll<NPCTag>().WithNone<HasTarget>().ForEach((Entity npc, ref Translation tr) =>
+            endSimulationEntityCommandBufferSystem = World.GetOrCreateSystem<EndSimulationEntityCommandBufferSystem>();
+        }
+
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        {
+            EntityQuery eq = GetEntityQuery(typeof(TargetTag), ComponentType.ReadOnly<Translation>());
+            NativeArray<Entity> entities = eq.ToEntityArray(Allocator.TempJob);
+            NativeArray<Translation> translations = eq.ToComponentDataArray<Translation>(Allocator.TempJob);
+            
+            NativeArray<EntityWithPosition> entitysWithPosition = new NativeArray<EntityWithPosition>(entities.Length, Allocator.TempJob);
+            for (int i = 0; i < entities.Length; i++)
             {
-                float3 npcPos = tr.Value;
+                entitysWithPosition[i] = new EntityWithPosition()
+                {
+                    Entity = entities[i],
+                    Position = translations[i].Value
+                };
+            }
+
+            entities.Dispose();
+            translations.Dispose();
+            
+            FindTargetJob findTargetJob = new FindTargetJob()
+            {
+                TargetArray = entitysWithPosition,
+                EntityCommandBuffer = endSimulationEntityCommandBufferSystem.CreateCommandBuffer().ToConcurrent()
+            };
+
+            JobHandle handle = findTargetJob.Schedule(this, inputDeps);
+            endSimulationEntityCommandBufferSystem.AddJobHandleForProducer(handle);
+            return handle;
+        }
+
+        public struct EntityWithPosition
+        {
+            public Entity Entity;
+            public float3 Position;
+        }
+
+        [RequireComponentTag(typeof(NPCTag))]
+        [ExcludeComponent(typeof(HasTarget))]
+//        [BurstCompile]
+        private struct FindTargetJob : IJobForEachWithEntity<Translation>
+        {
+            [ReadOnly]
+            [DeallocateOnJobCompletion]
+            public NativeArray<EntityWithPosition> TargetArray;
+
+            public EntityCommandBuffer.Concurrent EntityCommandBuffer;
+            
+            public void Execute(Entity npc, int index, [ReadOnly] ref Translation translation)
+            {
+                float3 npcPos = translation.Value;
 
                 float minDistance = float.MaxValue;
                 Entity target = Entity.Null;
 
-                Entities.WithAll<TargetTag>().ForEach((Entity entity, ref Translation position) =>
+                for (int i = 0; i < TargetArray.Length; i++)
                 {
-                    float distance = math.length(npcPos - position.Value);
+                    EntityWithPosition ent = TargetArray[i];
+                    float distance = math.length(npcPos - ent.Position);
                     if (distance < minDistance)
                     {
-                        target = entity;
+                        target = ent.Entity;
                         minDistance = distance;
                     }
-                });
+                }
                 
                 if (target != Entity.Null)
                 {
-                    PostUpdateCommands.AddComponent(npc, new HasTarget
+                    EntityCommandBuffer.AddComponent(index, npc, new HasTarget
                     {
                         Target = target
                     });
                 }
-            });
+            }
         }
     }
 
